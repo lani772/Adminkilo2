@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# database
+admin-panel.db
+admin-panel.db-journal
+*.db
+*.db-journal

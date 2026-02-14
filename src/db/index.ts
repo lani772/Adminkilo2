@@ -1,0 +1,211 @@
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/better-sqlite3';
+import * as schema from './schema';
+import { v4 as uuidv4 } from 'uuid';
+import bcrypt from 'bcryptjs';
+
+// Initialize SQLite database
+const sqlite = new Database('admin-panel.db');
+const db = drizzle(sqlite, { schema });
+
+// ============================================================================
+// DATABASE INITIALIZATION
+// ============================================================================
+
+export async function initializeDatabase() {
+  console.log('🔧 Initializing database...');
+
+  // Create tables (Drizzle will handle this via migrations, but for quick start we'll use raw SQL)
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      email TEXT NOT NULL UNIQUE,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'user',
+      first_name TEXT NOT NULL,
+      last_name TEXT NOT NULL,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      is_two_factor_enabled INTEGER NOT NULL DEFAULT 0,
+      two_factor_secret TEXT,
+      max_devices INTEGER NOT NULL DEFAULT 10,
+      max_lamps INTEGER NOT NULL DEFAULT 50,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_login_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS controllers (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      device_type TEXT NOT NULL,
+      mac_address TEXT NOT NULL UNIQUE,
+      ip_address TEXT NOT NULL,
+      firmware_version TEXT NOT NULL DEFAULT '1.0.0',
+      status TEXT NOT NULL DEFAULT 'offline',
+      owner_id TEXT NOT NULL,
+      location TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS lamps (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      controller_id TEXT NOT NULL,
+      pin INTEGER NOT NULL,
+      is_on INTEGER NOT NULL DEFAULT 0,
+      brightness INTEGER NOT NULL DEFAULT 100,
+      color TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (controller_id) REFERENCES controllers(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS permissions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      resource_type TEXT NOT NULL,
+      resource_id TEXT NOT NULL,
+      access_level TEXT NOT NULL,
+      granted_by TEXT NOT NULL,
+      granted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT,
+      time_restrictions TEXT,
+      ip_restrictions TEXT,
+      usage_limit INTEGER,
+      usage_count INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY (granted_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS system_config (
+      id TEXT PRIMARY KEY,
+      timezone TEXT NOT NULL DEFAULT 'UTC',
+      default_max_devices INTEGER NOT NULL DEFAULT 10,
+      default_max_lamps INTEGER NOT NULL DEFAULT 50,
+      data_retention_days INTEGER NOT NULL DEFAULT 90,
+      enable_email_notifications INTEGER NOT NULL DEFAULT 1,
+      enable_sms_notifications INTEGER NOT NULL DEFAULT 0,
+      enable_push_notifications INTEGER NOT NULL DEFAULT 1,
+      require_two_factor INTEGER NOT NULL DEFAULT 0,
+      password_min_length INTEGER NOT NULL DEFAULT 8,
+      password_require_special_char INTEGER NOT NULL DEFAULT 1,
+      max_login_attempts INTEGER NOT NULL DEFAULT 5,
+      lockout_duration_minutes INTEGER NOT NULL DEFAULT 30,
+      session_timeout_minutes INTEGER NOT NULL DEFAULT 60,
+      api_rate_limit_per_minute INTEGER NOT NULL DEFAULT 100,
+      maintenance_mode INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_by TEXT NOT NULL,
+      FOREIGN KEY (updated_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS system_alerts (
+      id TEXT PRIMARY KEY,
+      severity TEXT NOT NULL,
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      source TEXT NOT NULL,
+      is_resolved INTEGER NOT NULL DEFAULT 0,
+      resolved_at TEXT,
+      resolved_by TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (resolved_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS system_metrics (
+      id TEXT PRIMARY KEY,
+      timestamp TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      requests_per_second REAL NOT NULL,
+      cpu_usage REAL NOT NULL,
+      memory_usage REAL NOT NULL,
+      active_users INTEGER NOT NULL,
+      active_devices INTEGER NOT NULL,
+      total_devices INTEGER NOT NULL,
+      total_lamps INTEGER NOT NULL,
+      error_rate REAL NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id TEXT PRIMARY KEY,
+      action TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      username TEXT NOT NULL,
+      target_type TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      details TEXT NOT NULL,
+      ip_address TEXT NOT NULL,
+      user_agent TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS analytics_reports (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      type TEXT NOT NULL,
+      format TEXT NOT NULL,
+      generated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      generated_by TEXT NOT NULL,
+      download_url TEXT NOT NULL,
+      FOREIGN KEY (generated_by) REFERENCES users(id)
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      ip_address TEXT NOT NULL,
+      user_agent TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+
+  // Check if super admin exists
+  const existingAdmin = sqlite.prepare('SELECT id FROM users WHERE role = ?').get('super_admin');
+
+  if (!existingAdmin) {
+    console.log('👤 Creating default super admin user...');
+    
+    const adminId = uuidv4();
+    const passwordHash = await bcrypt.hash('admin123', 10);
+
+    sqlite.prepare(`
+      INSERT INTO users (id, username, email, password_hash, role, first_name, last_name, max_devices, max_lamps)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      adminId,
+      'admin',
+      'admin@example.com',
+      passwordHash,
+      'super_admin',
+      'Super',
+      'Admin',
+      999,
+      9999
+    );
+
+    // Create default system config
+    const configId = uuidv4();
+    sqlite.prepare(`
+      INSERT INTO system_config (id, updated_by)
+      VALUES (?, ?)
+    `).run(configId, adminId);
+
+    console.log('✅ Default super admin created:');
+    console.log('   Username: admin');
+    console.log('   Password: admin123');
+    console.log('   Email: admin@example.com');
+  }
+
+  console.log('✅ Database initialized successfully!');
+}
+
+export { db, sqlite };
+export default db;
