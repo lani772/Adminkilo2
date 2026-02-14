@@ -8,7 +8,10 @@ const dev = process.env.NODE_ENV !== 'production';
 const hostname = 'localhost';
 const port = parseInt(process.env.PORT || '3000', 10);
 
-const app = next({ dev, hostname, port });
+// Force development mode for bun dev
+const isDev = dev || process.argv.includes('dev');
+
+const app = next({ dev: isDev, hostname, port });
 const handle = app.getRequestHandler();
 
 async function main() {
