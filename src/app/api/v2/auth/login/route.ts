@@ -7,19 +7,19 @@ import { v4 as uuidv4 } from 'uuid';
 export async function POST(request: NextRequest) {
   try {
     const body: LoginRequest = await request.json();
-    const { username, password } = body;
+    const { email, password } = body;
 
-    if (!username || !password) {
+    if (!email || !password) {
       return NextResponse.json<ApiResponse>(
-        { success: false, error: 'Username and password are required' },
+        { success: false, error: 'Email and password are required' },
         { status: 400 }
       );
     }
 
-    // Find user by username or email
+    // Find user by email
     const user = sqlite.prepare(`
-      SELECT * FROM users WHERE username = ? OR email = ?
-    `).get(username, username) as any;
+      SELECT * FROM users WHERE email = ?
+    `).get(email) as any;
 
     if (!user) {
       return NextResponse.json<ApiResponse>(

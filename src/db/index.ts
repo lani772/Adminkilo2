@@ -202,7 +202,7 @@ export async function initializeDatabase() {
     console.log('👤 Creating default super admin user...');
     
     const adminId = uuidv4();
-    const passwordHash = await bcrypt.hash('admin123', 10);
+    const passwordHash = await bcrypt.hash('admin@123', 10);
     const now = new Date().toISOString();
 
     sqliteDb.run(`
@@ -211,7 +211,7 @@ export async function initializeDatabase() {
     `, [
       adminId,
       'admin',
-      'admin@example.com',
+      'laurentniyigena1@gmail.com',
       passwordHash,
       'super_admin',
       'Super',
@@ -249,9 +249,8 @@ export async function initializeDatabase() {
     ]);
 
     console.log('✅ Default super admin created:');
-    console.log('   Username: admin');
-    console.log('   Password: admin123');
-    console.log('   Email: admin@example.com');
+    console.log('   Email: laurentniyigena1@gmail.com');
+    console.log('   Password: admin@123');
   }
 
   // Save database to file
